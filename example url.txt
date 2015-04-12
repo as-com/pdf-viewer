@@ -1,0 +1,1 @@
+http://localhost:8080/?file=http://localhost:8080/textbook.pdf&pageMap=http://localhost:8080/textbook-map.js#pagemode=bookmarks&zoom=auto
