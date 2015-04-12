@@ -36,12 +36,10 @@ var SCALE_SELECT_CONTAINER_PADDING = 8;
 var SCALE_SELECT_PADDING = 22;
 var PAGE_NUMBER_LOADING_INDICATOR = 'visiblePageIsLoading';
 var DISABLE_AUTO_FETCH_LOADING_BAR_TIMEOUT = 5000;
-  PDFJS.useOnlyCssZoom = true;
-  PDFJS.disableTextLayer = true;
 
 PDFJS.imageResourcesPath = './images/';
-  PDFJS.workerSrc = '../build/pdf.worker.js';
-  PDFJS.cMapUrl = '../web/cmaps/';
+  PDFJS.workerSrc = './js/pdf.worker.js';
+  PDFJS.cMapUrl = './cmaps/';
   PDFJS.cMapPacked = true;
 
 var mozL10n = document.mozL10n || document.webL10n;
@@ -437,8 +435,8 @@ var DEFAULT_PREFERENCES = {
   disableStream: false,
   disableAutoFetch: false,
   disableFontFace: false,
-  disableTextLayer: true,
-  useOnlyCssZoom: true
+  disableTextLayer: false,
+  useOnlyCssZoom: false
 };
 
 
@@ -582,29 +580,234 @@ var Preferences = {
   }
 };
 
-  Preferences._writeToStorage = function (prefObj) {
-    return new Promise(function (resolve) {
-      asyncStorage.setItem('pdfjs.preferences', JSON.stringify(prefObj),
-                           resolve);
-    });
+
+
+Preferences._writeToStorage = function (prefObj) {
+  return new Promise(function (resolve) {
+    localStorage.setItem('pdfjs.preferences', JSON.stringify(prefObj));
+    resolve();
+  });
+};
+
+Preferences._readFromStorage = function (prefObj) {
+  return new Promise(function (resolve) {
+    var readPrefs = JSON.parse(localStorage.getItem('pdfjs.preferences'));
+    resolve(readPrefs);
+  });
+};
+
+
+(function mozPrintCallbackPolyfillClosure() {
+  if ('mozPrintCallback' in document.createElement('canvas')) {
+    return;
+  }
+  // Cause positive result on feature-detection:
+  HTMLCanvasElement.prototype.mozPrintCallback = undefined;
+
+  var canvases;   // During print task: non-live NodeList of <canvas> elements
+  var index;      // Index of <canvas> element that is being processed
+
+  var print = window.print;
+  window.print = function print() {
+    if (canvases) {
+      console.warn('Ignored window.print() because of a pending print job.');
+      return;
+    }
+    try {
+      dispatchEvent('beforeprint');
+    } finally {
+      canvases = document.querySelectorAll('canvas');
+      index = -1;
+      next();
+    }
   };
-  
-  Preferences._readFromStorage = function (prefObj) {
-    return new Promise(function (resolve) {
-      asyncStorage.getItem('pdfjs.preferences', function (prefStr) {
-        var readPrefs = JSON.parse(prefStr);
-        resolve(readPrefs);
-      });
+
+  function dispatchEvent(eventType) {
+    var event = document.createEvent('CustomEvent');
+    event.initCustomEvent(eventType, false, false, 'custom');
+    window.dispatchEvent(event);
+  }
+
+  function next() {
+    if (!canvases) {
+      return; // Print task cancelled by user (state reset in abort())
+    }
+
+    renderProgress();
+    if (++index < canvases.length) {
+      var canvas = canvases[index];
+      if (typeof canvas.mozPrintCallback === 'function') {
+        canvas.mozPrintCallback({
+          context: canvas.getContext('2d'),
+          abort: abort,
+          done: next
+        });
+      } else {
+        next();
+      }
+    } else {
+      renderProgress();
+      print.call(window);
+      setTimeout(abort, 20); // Tidy-up
+    }
+  }
+
+  function abort() {
+    if (canvases) {
+      canvases = null;
+      renderProgress();
+      dispatchEvent('afterprint');
+    }
+  }
+
+  function renderProgress() {
+    var progressContainer = document.getElementById('mozPrintCallback-shim');
+    if (canvases) {
+      var progress = Math.round(100 * index / canvases.length);
+      var progressBar = progressContainer.querySelector('progress');
+      var progressPerc = progressContainer.querySelector('.relative-progress');
+      progressBar.value = progress;
+      progressPerc.textContent = progress + '%';
+      progressContainer.removeAttribute('hidden');
+      progressContainer.onclick = abort;
+    } else {
+      progressContainer.setAttribute('hidden', '');
+    }
+  }
+
+  var hasAttachEvent = !!document.attachEvent;
+
+  window.addEventListener('keydown', function(event) {
+    // Intercept Cmd/Ctrl + P in all browsers.
+    // Also intercept Cmd/Ctrl + Shift + P in Chrome and Opera
+    if (event.keyCode === 80/*P*/ && (event.ctrlKey || event.metaKey) &&
+        !event.altKey && (!event.shiftKey || window.chrome || window.opera)) {
+      window.print();
+      if (hasAttachEvent) {
+        // Only attachEvent can cancel Ctrl + P dialog in IE <=10
+        // attachEvent is gone in IE11, so the dialog will re-appear in IE11.
+        return;
+      }
+      event.preventDefault();
+      if (event.stopImmediatePropagation) {
+        event.stopImmediatePropagation();
+      } else {
+        event.stopPropagation();
+      }
+      return;
+    }
+    if (event.keyCode === 27 && canvases) { // Esc
+      abort();
+    }
+  }, true);
+  if (hasAttachEvent) {
+    document.attachEvent('onkeydown', function(event) {
+      event = event || window.event;
+      if (event.keyCode === 80/*P*/ && event.ctrlKey) {
+        event.keyCode = 0;
+        return false;
+      }
     });
+  }
+
+  if ('onbeforeprint' in window) {
+    // Do not propagate before/afterprint events when they are not triggered
+    // from within this polyfill. (FF/IE).
+    var stopPropagationIfNeeded = function(event) {
+      if (event.detail !== 'custom' && event.stopImmediatePropagation) {
+        event.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener('beforeprint', stopPropagationIfNeeded, false);
+    window.addEventListener('afterprint', stopPropagationIfNeeded, false);
+  }
+})();
+
+
+
+var DownloadManager = (function DownloadManagerClosure() {
+
+  function download(blobUrl, filename) {
+    var a = document.createElement('a');
+    if (a.click) {
+      // Use a.click() if available. Otherwise, Chrome might show
+      // "Unsafe JavaScript attempt to initiate a navigation change
+      //  for frame with URL" and not open the PDF at all.
+      // Supported by (not mentioned = untested):
+      // - Firefox 6 - 19 (4- does not support a.click, 5 ignores a.click)
+      // - Chrome 19 - 26 (18- does not support a.click)
+      // - Opera 9 - 12.15
+      // - Internet Explorer 6 - 10
+      // - Safari 6 (5.1- does not support a.click)
+      a.href = blobUrl;
+      a.target = '_parent';
+      // Use a.download if available. This increases the likelihood that
+      // the file is downloaded instead of opened by another PDF plugin.
+      if ('download' in a) {
+        a.download = filename;
+      }
+      // <a> must be in the document for IE and recent Firefox versions.
+      // (otherwise .click() is ignored)
+      (document.body || document.documentElement).appendChild(a);
+      a.click();
+      a.parentNode.removeChild(a);
+    } else {
+      if (window.top === window &&
+          blobUrl.split('#')[0] === window.location.href.split('#')[0]) {
+        // If _parent == self, then opening an identical URL with different
+        // location hash will only cause a navigation, not a download.
+        var padCharacter = blobUrl.indexOf('?') === -1 ? '?' : '&';
+        blobUrl = blobUrl.replace(/#|$/, padCharacter + '$&');
+      }
+      window.open(blobUrl, '_parent');
+    }
+  }
+
+  function DownloadManager() {}
+
+  DownloadManager.prototype = {
+    downloadUrl: function DownloadManager_downloadUrl(url, filename) {
+      if (!PDFJS.isValidUrl(url, true)) {
+        return; // restricted/invalid URL
+      }
+
+      download(url + '#pdfjs.action=download', filename);
+    },
+
+    downloadData: function DownloadManager_downloadData(data, filename,
+                                                        contentType) {
+      if (navigator.msSaveBlob) { // IE10 and above
+        return navigator.msSaveBlob(new Blob([data], { type: contentType }),
+                                    filename);
+      }
+
+      var blobUrl = PDFJS.createObjectURL(data, contentType);
+      download(blobUrl, filename);
+    },
+
+    download: function DownloadManager_download(blob, url, filename) {
+      if (!URL) {
+        // URL.createObjectURL is not supported
+        this.downloadUrl(url, filename);
+        return;
+      }
+
+      if (navigator.msSaveBlob) {
+        // IE10 / IE11
+        if (!navigator.msSaveBlob(blob, filename)) {
+          this.downloadUrl(url, filename);
+        }
+        return;
+      }
+
+      var blobUrl = URL.createObjectURL(blob);
+      download(blobUrl, filename);
+    }
   };
 
+  return DownloadManager;
+})();
 
-
-
-
-  var DownloadManager = (function DownloadManagerClosure() {
-    return function DownloadManager() {};
-  })();
 
 
 
@@ -655,17 +858,18 @@ var ViewHistory = (function ViewHistoryClosure() {
       return new Promise(function (resolve) {
         var databaseStr = JSON.stringify(this.database);
 
-        asyncStorage.setItem('database', databaseStr, resolve);
 
 
+        localStorage.setItem('database', databaseStr);
+        resolve();
       }.bind(this));
     },
 
     _readFromStorage: function ViewHistory_readFromStorage() {
       return new Promise(function (resolve) {
-        asyncStorage.getItem('database', resolve);
 
 
+        resolve(localStorage.getItem('database'));
       });
     },
 
@@ -1346,9 +1550,9 @@ var PDFHistory = {
   _pushOrReplaceState: function pdfHistory_pushOrReplaceState(stateObj,
                                                               replace) {
     if (replace) {
-      window.history.replaceState(stateObj, '');
+      window.history.replaceState(stateObj, '', document.URL);
     } else {
-      window.history.pushState(stateObj, '');
+      window.history.pushState(stateObj, '', document.URL);
     }
   },
 
@@ -1732,6 +1936,7 @@ var PresentationMode = {
   active: false,
   args: null,
   contextMenuOpen: false,
+  prevCoords: { x: null, y: null },
 
   initialize: function presentationModeInitialize(options) {
     this.container = options.container;
@@ -1912,6 +2117,17 @@ var PresentationMode = {
   },
 
   mouseMove: function presentationModeMouseMove(evt) {
+    // Workaround for a bug in WebKit browsers that causes the 'mousemove' event
+    // to be fired when the cursor is changed. For details, see:
+    // http://code.google.com/p/chromium/issues/detail?id=103041.
+
+    var currCoords = { x: evt.clientX, y: evt.clientY };
+    var prevCoords = PresentationMode.prevCoords;
+    PresentationMode.prevCoords = currCoords;
+
+    if (currCoords.x === prevCoords.x && currCoords.y === prevCoords.y) {
+      return;
+    }
     PresentationMode.showControls();
   },
 
@@ -3176,6 +3392,13 @@ var PDFPageView = (function PDFPageViewClosure() {
           pageNumber: self.id
         });
         div.dispatchEvent(event);
+        // This custom event is deprecated, and will be removed in the future,
+        // please use the |pagerendered| event instead.
+        var deprecatedEvent = document.createEvent('CustomEvent');
+        deprecatedEvent.initCustomEvent('pagerender', true, true, {
+          pageNumber: pdfPage.pageNumber
+        });
+        div.dispatchEvent(deprecatedEvent);
 
         if (!error) {
           resolveRenderPromise(undefined);
@@ -5555,7 +5778,6 @@ var PDFViewerApplication = {
       return;
     }
     document.title = title;
-    document.getElementById('activityTitle').textContent = title;
   },
 
   close: function pdfViewClose() {
@@ -5639,8 +5861,6 @@ var PDFViewerApplication = {
           loadingErrorMessage = mozL10n.get('unexpected_response_error', null,
                                             'Unexpected server response.');
         }
-        window.alert(loadingErrorMessage);
-        return window.close();
 
         var moreInfo = {
           message: message
@@ -6442,6 +6662,7 @@ var PDFViewerApplication = {
     this.mouseScrollDelta = 0;
   }
 };
+window.PDFView = PDFViewerApplication; // obsolete name, using it as an alias
 
 
 function webViewerLoad(evt) {
@@ -6453,8 +6674,19 @@ function webViewerInitialized() {
   var params = PDFViewerApplication.parseQueryString(queryString);
   var file = 'file' in params ? params.file : DEFAULT_URL;
 
-  document.getElementById('openFile').setAttribute('hidden', 'true');
-  document.getElementById('secondaryOpenFile').setAttribute('hidden', 'true');
+  var fileInput = document.createElement('input');
+  fileInput.id = 'fileInput';
+  fileInput.className = 'fileInput';
+  fileInput.setAttribute('type', 'file');
+  fileInput.oncontextmenu = noContextMenuHandler;
+  document.body.appendChild(fileInput);
+
+  if (!window.File || !window.FileReader || !window.FileList || !window.Blob) {
+    document.getElementById('openFile').setAttribute('hidden', 'true');
+    document.getElementById('secondaryOpenFile').setAttribute('hidden', 'true');
+  } else {
+    document.getElementById('fileInput').value = null;
+  }
 
   var locale = PDFJS.locale || navigator.language;
 
@@ -6633,7 +6865,29 @@ function webViewerInitialized() {
     SecondaryToolbar.downloadClick.bind(SecondaryToolbar));
 
 
+  if (file && file.lastIndexOf('file:', 0) === 0) {
+    // file:-scheme. Load the contents in the main thread because QtWebKit
+    // cannot load file:-URLs in a Web Worker. file:-URLs are usually loaded
+    // very quickly, so there is no need to set up progress event listeners.
+    PDFViewerApplication.setTitleUsingUrl(file);
+    var xhr = new XMLHttpRequest();
+    xhr.onload = function() {
+      PDFViewerApplication.open(new Uint8Array(xhr.response), 0);
+    };
+    try {
+      xhr.open('GET', file);
+      xhr.responseType = 'arraybuffer';
+      xhr.send();
+    } catch (e) {
+      PDFViewerApplication.error(mozL10n.get('loading_error', null,
+        'An error occurred while loading the PDF.'), e);
+    }
+    return;
+  }
 
+  if (file) {
+    PDFViewerApplication.open(file, 0);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', webViewerLoad, true);
@@ -7177,20 +7431,4 @@ window.addEventListener('afterprint', function afterPrint(evt) {
   });
 })();
 
-  window.navigator.mozSetMessageHandler('activity', function(activity) {
-    var blob = activity.source.data.blob;
-    PDFJS.maxImageSize = 1024 * 1024;
-    var fileURL = activity.source.data.url;
-  
-    var url = URL.createObjectURL(blob);
-    // We need to delay opening until all HTML is loaded.
-    PDFViewerApplication.animationStartedPromise.then(function () {
-      PDFViewerApplication.open({url : url, originalUrl: fileURL});
-  
-      var header = document.getElementById('header');
-      header.addEventListener('action', function() {
-        activity.postResult('close');
-      });
-    });
-  });
 
