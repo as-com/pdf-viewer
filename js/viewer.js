@@ -432,8 +432,8 @@ var DEFAULT_PREFERENCES = {
   enableWebGL: false,
   pdfBugEnabled: false,
   disableRange: false,
-  disableStream: false,
-  disableAutoFetch: false,
+  disableStream: true,
+  disableAutoFetch: true,
   disableFontFace: false,
   disableTextLayer: false,
   useOnlyCssZoom: false
