@@ -6242,6 +6242,8 @@ var PDFViewerApplication = {
 		Promise.all(promises).then(function() {
 			pdfDocument.getOutline().then(function(outline) {
 				var container = document.getElementById('outlineView');
+
+				
 				self.outline = new PDFOutlineView({
 					container: container,
 					outline: outline,
