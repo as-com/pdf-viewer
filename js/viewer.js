@@ -6151,7 +6151,7 @@ var PDFViewerApplication = {
 		var pagesCount = pdfDocument.numPages;
 		document.getElementById('numPages').textContent =
 			mozL10n.get('page_of', {pageCount: pagesCount}, 'of {{pageCount}}');
-		document.getElementById('pageNumber').max = pagesCount;
+		//document.getElementById('pageNumber').max = pagesCount;
 
 		var id = this.documentFingerprint = pdfDocument.fingerprint;
 		var store = this.store = new ViewHistory(id);
@@ -6841,11 +6841,18 @@ function webViewerInitialized() {
 	});
 
 	document.getElementById('pageNumber').addEventListener('change', function() {
-		// Handle the user inputting a floating point number.
-		PDFViewerApplication.page = (this.value | 0);
+		if (hasPageMap) {
+			console.log(pageMap[this.value])
+			PDFViewerApplication.page = pageMap[this.value];
 
-		if (this.value !== (this.value | 0).toString()) {
-			this.value = PDFViewerApplication.page;
+			this.value = pageMapRev[PDFViewerApplication.page];
+		} else {
+			// Handle the user inputting a floating point number.
+			PDFViewerApplication.page = (this.value | 0);
+
+			if (this.value !== (this.value | 0).toString()) {
+				this.value = PDFViewerApplication.page;
+			}
 		}
 	});
 
@@ -7109,7 +7116,8 @@ window.addEventListener('scalechange', function scalechange(evt) {
 window.addEventListener('pagechange', function pagechange(evt) {
 	var page = evt.pageNumber;
 	if (evt.previousPageNumber !== page) {
-		document.getElementById('pageNumber').value = page;
+		document.getElementById('pageNumber').value = pageMapRev[page];
+		document.getElementById("pageRawLabel").innerHTML = page;
 		if (PDFViewerApplication.sidebarOpen) {
 			PDFViewerApplication.pdfThumbnailViewer.scrollThumbnailIntoView(page);
 		}
