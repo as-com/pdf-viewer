@@ -29,8 +29,21 @@ http://sourceforge.net/adobe/cmap/wiki/License/
 
 	<style>
 		/* Custom styles */
-		#openFile, #print, #loadingBar { 
+		#openFile, #print, #loadingBar, #toolbarSidebar { 
 			display: none !important;
+		}
+		#sidebarContent {
+			top: 0;
+		}
+		#outlineView, #sidebarContent, #sidebarContainer {
+			width: 300px;
+		}
+		#outlineView {
+			padding-right: 0;
+			padding-left: 0;
+		}
+		html[dir='ltr'] #outerContainer.sidebarOpen > #mainContainer {
+			left: 300px;
 		}
 	</style>
 
