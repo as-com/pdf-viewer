@@ -5368,6 +5368,12 @@ var PDFOutlineView = (function PDFOutlineViewClosure() {
 		},
 
 		render: function PDFOutlineView_render() {
+			// ugh hacks
+			// if (hasPageMap) {
+			// 	document.getElementById('pageNumber').value = pageMapRev[page];
+			// } else {
+			// 	document.getElementById('pageNumber').value = page;
+			// }
 			var outline = this.outline;
 			var outlineCount = 0;
 
@@ -6331,6 +6337,9 @@ var PDFViewerApplication = {
 		// if 'currentPageNumber' is larger than the number of pages in the file.
 		document.getElementById('pageNumber').value =
 			this.pdfViewer.currentPageNumber = 1;
+		if (hasPageMap) {
+			document.getElementById('pageNumber').value = pageMapRev[1];
+		}
 
 		if (PDFHistory.initialDestination) {
 			this.navigateTo(PDFHistory.initialDestination);
@@ -7116,7 +7125,12 @@ window.addEventListener('scalechange', function scalechange(evt) {
 window.addEventListener('pagechange', function pagechange(evt) {
 	var page = evt.pageNumber;
 	if (evt.previousPageNumber !== page) {
-		document.getElementById('pageNumber').value = pageMapRev[page];
+		if (hasPageMap) {
+			document.getElementById('pageNumber').value = pageMapRev[page];
+		} else {
+			document.getElementById('pageNumber').value = page;
+		}
+		
 		document.getElementById("pageRawLabel").innerHTML = page;
 		if (PDFViewerApplication.sidebarOpen) {
 			PDFViewerApplication.pdfThumbnailViewer.scrollThumbnailIntoView(page);
