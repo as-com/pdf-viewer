@@ -77,21 +77,15 @@ http://sourceforge.net/adobe/cmap/wiki/License/
 			// document.write('<script type="text/javascript" src="' + getParameterByName("pageMap") +'"><\/script>');
 			$.ajax({
 			  type: 'GET',
+			  async: false,
 			  url: getParameterByName("pageMap"),
 			  dataType: 'json',
 			  success: function(data){
-			    // Supposing this JSON payload was received:
-			    //   {"project": {"id": 42, "html": "<div>..." }}
-			    // append the HTML to context object.
 			    pageMap = data;
 			    hasPageMap = true;
+			    var pageMapRev = _.invert(pageMap);
 			  }
 			});
-		}
-	</script>
-	<script>
-		if (hasPageMap) {
-			var pageMapRev = _.invert(pageMap);
 		}
 	</script>
 
