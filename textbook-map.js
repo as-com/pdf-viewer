@@ -1,4 +1,4 @@
-var pageMap = {
+{
 	"cover": 1,
 	"i": 2,
 	"ii": 3,
